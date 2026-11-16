@@ -233,12 +233,13 @@ def test_snapshot_isolation():
     before = probe.execute("SELECT count(*) FROM test_orders").fetchone()[0]
 
     writer = psycopg.connect(DATABASE_URL, autocommit=True)
+    # 900 避开种子与演示数据占用的 id（演示数据已用到 13）
     writer.execute(
-        "INSERT INTO test_orders VALUES (9, 6, 'ORD-009', 'done', NULL, NULL)"
+        "INSERT INTO test_orders VALUES (900, 6, 'ORD-009', 'done', NULL, NULL)"
     )  # 若快照阻塞写入，这里会挂起或报错
     during = probe.execute("SELECT count(*) FROM test_orders").fetchone()[0]
     check("快照内计数不受并发写入影响", during == before, f"before={before} during={during}")
-    writer.execute("DELETE FROM test_orders WHERE id = 9")
+    writer.execute("DELETE FROM test_orders WHERE id = 900")
     writer.close()
     probe.close()
 

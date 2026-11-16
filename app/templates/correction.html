@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>复测更正</title>
+<style>
+  body { font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+         margin: 2rem auto; max-width: 1080px; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 1.8rem; }
+  table { border-collapse: collapse; width: 100%; margin: .6rem 0; }
+  th, td { border: 1px solid #ddd; padding: .45rem .6rem; text-align: left; font-size: .92rem; }
+  th { background: #f0f4f8; }
+  a.btn, button.btn { display: inline-block; padding: .3rem .8rem; border-radius: 6px;
+          background: #1769aa; color: #fff; text-decoration: none; font-size: .88rem;
+          border: none; cursor: pointer; }
+  a.btn:hover, button.btn:hover { background: #0d4f86; }
+  .muted { color: #888; }
+  .flash { border-radius: 8px; padding: .8rem 1rem; margin: 1rem 0; }
+  .flash.ok { border: 1px solid #b4d8b4; background: #f2fbf2; }
+  .flash.warn { border: 1px solid #e0c07a; background: #fffaef; }
+  .panel { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.2rem; margin: 1rem 0; background: #fafafa; }
+  .oprow { display: flex; gap: .5rem; flex-wrap: wrap; align: center; padding: .45rem 0;
+           border-bottom: 1px dashed #e0e0e0; }
+  .oprow select, .oprow input { padding: .3rem .45rem; font-size: .9rem; }
+  .opidx { font-weight: bold; min-width: 3.2rem; }
+  .delx { background: #b03a3a !important; }
+  #opcount { font-weight: bold; }
+  code { background: #eef2f6; padding: .05rem .35rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>复测更正（入仓前拦截）</h1>
+<p><a href="/">← 返回检测单列表 / SQL 抽取</a></p>
+
+{% if flash_msg %}
+<div class="flash {{ 'warn' if flash_conflict else 'ok' }}">
+  {{ '⚠ 并发冲突：' if flash_conflict else '✔ ' }}{{ flash_msg }}
+</div>
+{% endif %}
+
+<div class="panel">
+  <form method="get" action="/correction">
+    <label>按样本查看：
+      <select name="sample" onchange="this.form.submit()">
+        <option value="">— 选择样本 —</option>
+        {% for s in samples %}
+        <option value="{{ s.id }}" {{ 'selected' if selected == s.id else '' }}>
+          样本 {{ s.id }} / {{ s.sample_code }}{% if s.batch_no %}（批次 {{ s.batch_no }}）{% endif %} · {{ s.order_count }} 单
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <noscript><button class="btn" type="submit">查看</button></noscript>
+  </form>
+</div>
+
+{% if current %}
+<h2>样本 {{ current.id }} / {{ current.sample_code }}{% if current.batch_no %} · 批次 {{ current.batch_no }}{% endif %} 的检测单</h2>
+{% set sample_orders = orders | selectattr('sample_id', 'equalto', current.id) | list %}
+<table>
+  <tr><th>检测单 ID</th><th>检测单号</th><th>状态</th><th>当前样本</th></tr>
+  {% for o in sample_orders %}
+  <tr><td>{{ o.id }}</td><td>{{ o.order_no }}</td><td>{{ o.status }}</td><td>{{ o.sample_code }}</td></tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">该样本暂无检测单。</td></tr>
+  {% endfor %}
+</table>
+
+<h2>该样本现有的复测边</h2>
+{% set sample_links = links | selectattr('sample_id', 'equalto', current.id) | list %}
+<table>
+  <tr><th>原检测单</th><th>复测检测单</th><th>原因</th></tr>
+  {% for l in sample_links %}
+  <tr>
+    <td>{{ l.orig_order_id }}（{{ l.orig_no }}）</td>
+    <td>{{ l.retest_order_id }}（{{ l.retest_no }}）</td>
+    <td>{{ l.reason or '—' }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">该样本暂无复测边。</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>提交更正（一单最多 {{ max_ops }} 项操作，整单事务：失败全部回滚）</h2>
+<form method="post" action="/correction" id="corrForm">
+  <input type="hidden" name="sample_id" value="{{ selected if selected else '' }}">
+  <div id="ops"></div>
+  <p>
+    <button type="button" class="btn" onclick="addOp()">＋ 增加一项操作</button>
+    已添加 <span id="opcount">0</span> / {{ max_ops }} 项
+  </p>
+  <p><button type="submit" class="btn">提交更正</button>
+     <span class="muted">提交时数据库在事务提交瞬间校验：边两端同样本、无自环、无有向环；并发冲突会整单回滚并提示重试。</span></p>
+</form>
+
+<script>
+const MAX_OPS = {{ max_ops }};
+const orderOptions = [
+  {% for o in orders %}
+  { id: {{ o.id }}, label: "{{ o.id }} / {{ o.order_no }} / 样本{{ o.sample_id }}" }{% if not loop.last %},{% endif %}
+  {% endfor %}
+];
+const sampleOptions = [
+  {% for s in samples %}
+  { id: {{ s.id }}, label: "{{ s.id }} / {{ s.sample_code }}" }{% if not loop.last %},{% endif %}
+  {% endfor %}
+];
+let seq = 0;
+
+function selectOpts(opts, name) {
+  return '<select name="' + name + '">' + opts.map(o =>
+    '<option value="' + o.id + '">' + o.label + '</option>').join('') + '</select>';
+}
+
+function addOp() {
+  if (seq >= MAX_OPS) { alert('一单最多 ' + MAX_OPS + ' 项操作'); return; }
+  const i = seq++;
+  const div = document.createElement('div');
+  div.className = 'oprow';
+  div.dataset.idx = i;
+  div.innerHTML =
+    '<span class="opidx">#' + (i + 1) + '</span>' +
+    '<select name="kind-' + i + '" onchange="toggleFields(this)">' +
+      '<option value="add_edge">新增复测边</option>' +
+      '<option value="del_edge">删除复测边</option>' +
+      '<option value="move_order">修改样本归属</option>' +
+    '</select>' +
+    '<span class="f edge-fields">原单 ' + selectOpts(orderOptions, 'orig-' + i) +
+      ' → 复测单 ' + selectOpts(orderOptions, 'retest-' + i) +
+      ' 原因 <input name="reason-' + i + '" size="18" placeholder="可空"></span>' +
+    '<span class="f move-fields" style="display:none">检测单 ' + selectOpts(orderOptions, 'order-' + i) +
+      ' 归属改为样本 ' + selectOpts(sampleOptions, 'sample-' + i) + '</span>' +
+    '<button type="button" class="btn delx" onclick="removeOp(this)">移除</button>';
+  document.getElementById('ops').appendChild(div);
+  document.getElementById('opcount').textContent =
+    document.querySelectorAll('#ops .oprow').length;
+}
+
+function toggleFields(sel) {
+  const row = sel.closest('.oprow');
+  const isMove = sel.value === 'move_order';
+  row.querySelector('.edge-fields').style.display = isMove ? 'none' : '';
+  row.querySelector('.move-fields').style.display = isMove ? '' : 'none';
+}
+
+function removeOp(btn) {
+  btn.closest('.oprow').remove();
+  document.getElementById('opcount').textContent =
+    document.querySelectorAll('#ops .oprow').length;
+}
+
+// 默认给一行，方便演示
+addOp();
+</script>
+<noscript>
+  <p class="muted">未启用 JavaScript 时，请按 <code>kind-N/orig-N/retest-N/reason-N/order-N/sample-N</code>
+  （N 从 0 连续编号）字段名直接提交表单。</p>
+</noscript>
+</body>
+</html>

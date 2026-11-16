@@ -3,21 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>抽取失败</title>
+<title>操作失败</title>
 <style>
   body { font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
-         margin: 3rem auto; max-width: 640px; padding: 0 1rem; color: #222; }
+         margin: 3rem auto; max-width: 720px; padding: 0 1rem; color: #222; }
   .box { border: 1px solid #e0b4b4; background: #fff6f6; border-radius: 8px; padding: 1.2rem 1.5rem; }
   h1 { font-size: 1.3rem; color: #9f3a38; margin-top: 0; }
+  pre { white-space: pre-wrap; word-break: break-all; background: #fbeeee;
+        border-radius: 6px; padding: .6rem .8rem; font-size: .9rem; }
   a { color: #1769aa; }
 </style>
 </head>
 <body>
 <div class="box">
-  <h1>无法提供下载（{{ status }}）</h1>
+  <h1>
+    {% if context == "correction" %}更正提交失败（{{ status }}）
+    {% else %}无法提供下载（{{ status }}）{% endif %}
+  </h1>
   <p>{{ message }}</p>
+  {% if detail %}<pre>{{ detail }}</pre>{% endif %}
+  {% if context == "correction" %}
+  <p>本次提交的全部操作已在数据库事务中整体回滚，未产生任何部分修改；已有关系不会被自动改写。</p>
+  {% else %}
   <p>未生成任何部分结果文件。</p>
+  {% endif %}
 </div>
+{% if context == "correction" %}
+<p><a href="/correction">← 返回复测更正</a> ｜ <a href="/">返回检测单列表</a></p>
+{% else %}
 <p><a href="/">← 返回检测单列表</a></p>
+{% endif %}
 </body>
 </html>
