@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>检测单关联数据抽取</title>
+<style>
+  body { font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+         margin: 2rem auto; max-width: 960px; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  .counts { display: flex; gap: 1rem; margin: 1rem 0 1.5rem; flex-wrap: wrap; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: .6rem 1rem; background: #fafafa; }
+  .card b { font-size: 1.2rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: .45rem .6rem; text-align: left; font-size: .92rem; }
+  th { background: #f0f4f8; }
+  a.btn { display: inline-block; padding: .25rem .7rem; border-radius: 6px;
+          background: #1769aa; color: #fff; text-decoration: none; font-size: .88rem; }
+  a.btn:hover { background: #0d4f86; }
+  .muted { color: #888; }
+</style>
+</head>
+<body>
+<h1>检测单关联数据抽取</h1>
+<p>选择一张检测单，下载可在空库执行的 SQL：包含四表结构（主键/外键）以及从该检测单沿外键递归可达的全部被引用行。</p>
+
+<div class="counts">
+  <div class="card">批次 batches<br><b>{{ counts.batches }}</b> 行</div>
+  <div class="card">样本 samples<br><b>{{ counts.samples }}</b> 行</div>
+  <div class="card">检测单 test_orders<br><b>{{ counts.test_orders }}</b> 行</div>
+  <div class="card">复测关联 retest_links<br><b>{{ counts.retest_links }}</b> 行</div>
+</div>
+
+<table>
+  <tr>
+    <th>ID</th><th>检测单号</th><th>状态</th><th>样本</th><th>批次</th>
+    <th>最近复测关联<br><span class="muted">(原单, 复测单)</span></th><th>操作</th>
+  </tr>
+  {% for o in orders %}
+  <tr>
+    <td>{{ o.id }}</td>
+    <td>{{ o.order_no }}</td>
+    <td>{{ o.status }}</td>
+    <td>{{ o.sample_code or "—" }}</td>
+    <td>{{ o.batch_no or "—" }}</td>
+    <td>
+      {% if o.latest_retest_orig is not none and o.latest_retest_retest is not none %}
+        ({{ o.latest_retest_orig }}, {{ o.latest_retest_retest }})
+      {% elif o.latest_retest_orig is not none or o.latest_retest_retest is not none %}
+        <span class="muted">部分为空 ({{ o.latest_retest_orig or "NULL" }}, {{ o.latest_retest_retest or "NULL" }})</span>
+      {% else %}—{% endif %}
+    </td>
+    <td><a class="btn" href="/export/{{ o.id }}">下载 SQL</a></td>
+  </tr>
+  {% endfor %}
+</table>
+</body>
+</html>
